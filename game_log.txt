@@ -1,0 +1,4 @@
+Game started. Top card: 10 of Hearts
+mo played ['Joker of Black']
+rr played ['K of Hearts']
+Invalid: First card in stack doesn't match top card.
