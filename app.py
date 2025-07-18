@@ -1,4 +1,5 @@
 # app.py
+import streamlit as st
 from streamlit_autorefresh import st_autorefresh
 import hashlib
 import json
@@ -6,9 +7,11 @@ import uuid
 import time
 import random
 import io
-from streamlit_autorefresh import st_autorefresh
 from db import init_db, save_game_state, load_game_state, list_games
 from game_logic import Deck, Card, Player, play_card, check_victory, current_player, next_turn, is_valid_play, calculate_card_points, disqualify_player
+
+st.set_page_config(page_title="Karata ya Kushuka", layout="wide")
+
 
 SUIT_SYMBOLS = {
     'Hearts': '❤️',
@@ -106,7 +109,6 @@ def create_rules_pdf():
     buffer.seek(0)
     return buffer
 
-st.set_page_config(page_title="Karata ya Kushuka", layout="wide")
 st.title("🃏 Karata ya Kushuka")
 init_db()
 
