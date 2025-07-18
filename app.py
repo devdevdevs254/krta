@@ -3,12 +3,17 @@ import streamlit as st
 from streamlit_autorefresh import st_autorefresh
 import hashlib
 import json
+import os
 import uuid
 import time
 import random
 import io
 from db import init_db, save_game_state, load_game_state, list_games
+from backup_utils import startup_backup_routine
 from game_logic import Deck, Card, Player, play_card, check_victory, current_player, next_turn, is_valid_play, calculate_card_points, disqualify_player
+import io
+from reportlab.lib.pagesizes import letter
+from reportlab.pdfgen import canvas
 
 st.set_page_config(page_title="Karata ya Kushuka", layout="wide")
 
@@ -63,17 +68,39 @@ def hash_state(state):
     }
     return hashlib.md5(json.dumps(relevant, sort_keys=True).encode()).hexdigest()
 
+DB_FILE = "game.db"
+BACKUP_DIR = "game_states"
+os.makedirs(BACKUP_DIR, exist_ok=True)
+
 def save_game_state(game_code, state, players):
-    state['player_ids'] = {k: v for k, v in state.get('player_ids', {}).items() if k in players}
+    # Convert card objects to tuples
     state['deck'] = [c.to_tuple() for c in state.get('deck', [])]
     state['discard_pile'] = [c.to_tuple() for c in state.get('discard_pile', [])]
-    players = {k: [c.to_tuple() for c in v] for k, v in players.items()}
-    save_game_state(game_code, state, players)
+    serialized_players = {k: [c.to_tuple() for c in v] for k, v in players.items()}
 
-def create_rules_pdf():
-    import io
-    from reportlab.lib.pagesizes import letter
-    from reportlab.pdfgen import canvas
+    # Serialize to JSON strings
+    state_json = json.dumps(state)
+    players_json = json.dumps(serialized_players)
+
+    # ✅ Save to DB
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            c = conn.cursor()
+            c.execute("""
+                INSERT OR REPLACE INTO games (game_code, state, players)
+                VALUES (?, ?, ?)
+            """, (game_code, state_json, players_json))
+            conn.commit()
+    except Exception as e:
+        print(f"[DB ERROR] Failed to save to DB: {e}")
+
+    # ✅ Also save to JSON file (backup)
+    try:
+        with open(f"{BACKUP_DIR}/{game_code}.json", "w") as f:
+            json.dump({"state": state, "players": serialized_players}, f)
+    except Exception as e:
+        print(f"[FILE ERROR] Failed to save backup file: {e}")def create_rules_pdf():
+
 
     buffer = io.BytesIO()
     c = canvas.Canvas(buffer, pagesize=letter)
@@ -111,6 +138,9 @@ def create_rules_pdf():
 
 st.title("🃏 Karata ya Kushuka")
 init_db()
+startup_backup_routine(list_games, lambda code: load_from_db(code))
+periodic_cleanup()
+
 
 # PDF Download
 rules_pdf = create_rules_pdf()

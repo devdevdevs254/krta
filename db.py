@@ -1,54 +1,47 @@
-import os
+# db.py
 import sqlite3
 import json
+import os
 
-DB_FILE = "karata_state.db"
+DB_FILE = "karata.db"
 
-# 🚀 Ensure database and table exist
 def init_db():
+    os.makedirs("game_states", exist_ok=True)
     with sqlite3.connect(DB_FILE) as conn:
         c = conn.cursor()
-        c.execute('''
+        c.execute("""
             CREATE TABLE IF NOT EXISTS games (
                 game_code TEXT PRIMARY KEY,
                 state TEXT,
                 players TEXT
             )
-        ''')
+        """)
         conn.commit()
 
-# 💾 Save the full game state and players to the DB
-def save_game_state(game_code, state: dict, players: dict):
+def save_to_db(game_code, state, players):
+    state_json = json.dumps(state)
+    players_json = json.dumps(players)
     with sqlite3.connect(DB_FILE) as conn:
         c = conn.cursor()
-        c.execute(
-            "REPLACE INTO games (game_code, state, players) VALUES (?, ?, ?)",
-            (game_code, json.dumps(state), json.dumps(players))
-        )
+        c.execute("""
+            INSERT OR REPLACE INTO games (game_code, state, players)
+            VALUES (?, ?, ?)
+        """, (game_code, state_json, players_json))
         conn.commit()
 
-# 📦 Load the game state for a given game code
-def load_game_state(game_code):
+def load_from_db(game_code):
     with sqlite3.connect(DB_FILE) as conn:
         c = conn.cursor()
         c.execute("SELECT state, players FROM games WHERE game_code = ?", (game_code,))
         row = c.fetchone()
-        if row:
-            state = json.loads(row[0])
-            players = json.loads(row[1])
-            return state, players
-        return None
+        if not row:
+            raise ValueError(f"Game code {game_code} not found")
+        state = json.loads(row[0])
+        players = json.loads(row[1])
+        return state, players
 
-# 📋 List all active game codes (e.g., for lobby view)
 def list_games():
     with sqlite3.connect(DB_FILE) as conn:
         c = conn.cursor()
         c.execute("SELECT game_code FROM games")
         return [row[0] for row in c.fetchall()]
-
-# 🧹 Optional: Remove a game from the DB
-def delete_game(game_code):
-    with sqlite3.connect(DB_FILE) as conn:
-        c = conn.cursor()
-        c.execute("DELETE FROM games WHERE game_code = ?", (game_code,))
-        conn.commit()
