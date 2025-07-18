@@ -72,34 +72,14 @@ DB_FILE = "game.db"
 BACKUP_DIR = "game_states"
 os.makedirs(BACKUP_DIR, exist_ok=True)
 
-def save_game_state(game_code, state, players):
-    # Convert card objects to tuples
-    state['deck'] = [c.to_tuple() for c in state.get('deck', [])]
-    state['discard_pile'] = [c.to_tuple() for c in state.get('discard_pile', [])]
-    serialized_players = {k: [c.to_tuple() for c in v] for k, v in players.items()}
-
-    # Serialize to JSON strings
-    state_json = json.dumps(state)
-    players_json = json.dumps(serialized_players)
-
-    # ✅ Save to DB
-    try:
-        with sqlite3.connect(DB_FILE) as conn:
-            c = conn.cursor()
-            c.execute("""
-                INSERT OR REPLACE INTO games (game_code, state, players)
-                VALUES (?, ?, ?)
-            """, (game_code, state_json, players_json))
-            conn.commit()
-    except Exception as e:
-        print(f"[DB ERROR] Failed to save to DB: {e}")
-
-    # ✅ Also save to JSON file (backup)
-    try:
-        with open(f"{BACKUP_DIR}/{game_code}.json", "w") as f:
-            json.dump({"state": state, "players": serialized_players}, f)
-    except Exception as e:
-        print(f"[FILE ERROR] Failed to save backup file: {e}")def create_rules_pdf():
+def prepare_and_save_game_state(game_code, state, players):
+    state['deck'] = [c.to_tuple() if isinstance(c, Card) else c for c in state.get('deck', [])]
+    state['discard_pile'] = [c.to_tuple() if isinstance(c, Card) else c for c in state.get('discard_pile', [])]
+    serialized_players = {
+        k: [c.to_tuple() if isinstance(c, Card) else c for c in v]
+        for k, v in players.items()
+    }
+    save_game_state(game_code, state, serialized_players)  # calls the original one from db.py
 
 
     buffer = io.BytesIO()
