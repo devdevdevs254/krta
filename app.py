@@ -1,5 +1,7 @@
 # app.py
-import streamlit as st
+from streamlit_autorefresh import st_autorefresh
+import hashlib
+import json
 import uuid
 import time
 import random
@@ -46,6 +48,24 @@ def get_game_state():
     if not state_data:
         st.stop()
     return state_data
+
+def hash_state(state):
+    relevant = {
+        "top_card": state["top_card"],
+        "turn_index": state["turn_index"],
+        "fine": state["fine"],
+        "requested_suit": state.get("requested_suit"),
+        "requested_rank": state.get("requested_rank"),
+        "log": state["log"][-3:]  # Only last 3 events to avoid over-refresh
+    }
+    return hashlib.md5(json.dumps(relevant, sort_keys=True).encode()).hexdigest()
+
+def save_game_state(game_code, state, players):
+    state['player_ids'] = {k: v for k, v in state.get('player_ids', {}).items() if k in players}
+    state['deck'] = [c.to_tuple() for c in state.get('deck', [])]
+    state['discard_pile'] = [c.to_tuple() for c in state.get('discard_pile', [])]
+    players = {k: [c.to_tuple() for c in v] for k, v in players.items()}
+    save_game_state(game_code, state, players)
 
 def create_rules_pdf():
     import io
@@ -154,7 +174,7 @@ if st.session_state.game_code and st.session_state.player_name:
             save_game_state(game_code, {
                 'top_card': top.to_tuple(),
                 'deck': d.to_list(),
-                'discard': [],
+                'discard_pile': [],
                 'turn_index': 0,
                 'direction': 1,
                 'fine': 0,
@@ -175,6 +195,21 @@ if st.session_state.game_code and st.session_state.player_name:
             st.rerun()
     else:
         state, players = get_game_state()
+        turn_player = list(players.keys())[state['turn_index']]
+        player_name = st.session_state.player_name
+
+# 🧠 Hash-based sync detection (optional)
+        if 'state_hash' not in st.session_state:
+            st.session_state.state_hash = ""
+
+        new_hash = hash_state(state)
+        if new_hash != st.session_state.state_hash:
+            st.session_state.state_hash = new_hash
+            st.rerun()
+
+# 🔁 Always refresh when game hasn’t started or it’s not your turn
+        if not state.get('started') or player_name != turn_player:
+            st_autorefresh(interval=3000, key="sync")
 
         if state.get('lobby_password') and state['lobby_password'] != lobby_password:
             st.error("Incorrect password for this lobby.")
@@ -251,28 +286,13 @@ if st.session_state.game_code and st.session_state.player_name:
                 request_suit = st.selectbox("Request Suit", [None] + list(SUIT_SYMBOLS.keys())) if len(cards_to_play) >= 1 and cards_to_play[0].rank == 'A' else None
                 request_rank = st.selectbox("Request Rank", [None] + RANKS) if len(cards_to_play) == 2 and cards_to_play[0].rank == 'A' else None
 
-                result, new_top, fine, direction, q_pending, q_rank, discard, req_suit, req_rank = play_card(
-                    player_obj, cards_to_play,
-                    Card.from_tuple(state['top_card']),
-                    state['fine'], state['direction'],
-                    state['question_pending'], state['question_rank'],
-                    [Card.from_tuple(t) for t in state['discard']],
-                    request_suit, request_rank
-                )
+                result = play_card(player_obj, cards_to_play, state['top_card'], state['fine'], state['direction'],
+                                   state['question_pending'], state['question_rank'],
+                                    state['discard_pile'], st.session_state.requested_suit,
+                                   st.session_state.requested_rank)
 
                 if result:
-                    hand = [c.to_tuple() for c in player_obj.hand]
-                    state.update({
-                        'top_card': new_top.to_tuple(),
-                        'fine': fine,
-                        'direction': direction,
-                        'question_pending': q_pending,
-                        'question_rank': q_rank,
-                        'discard': [c.to_tuple() for c in discard],
-                        'requested_suit': req_suit,
-                        'requested_rank': req_rank,
-                        'turn_index': (state['turn_index'] + direction) % len(players)
-                    })
+                    new_top, fine, direction, question_card_pending, question_card_rank, discard_pile, requested_suit, requested_rank = result
 
                     state['log'].append(f"{player_name} played {[card_display(c.to_tuple()) for c in cards_to_play]}")
                     players[player_name] = hand
@@ -299,17 +319,17 @@ if st.session_state.game_code and st.session_state.player_name:
         with col2:
             if st.button("Draw"):
                 deck = [Card.from_tuple(t) for t in state['deck']]
-                discard = [Card.from_tuple(t) for t in state['discard']]
-                if not deck and discard:
-                    random.shuffle(discard)
-                    deck = discard
-                    discard = []
+                discard_pile = [Card.from_tuple(t) for t in state['discard_pile']]
+                if not deck and discard_pile:
+                    random.shuffle(discard_pile)
+                    deck = discard_pile
+                    discard_pile = []
 
                 if deck:
                     drawn = deck.pop()
                     hand.append(drawn.to_tuple())
                     state['deck'] = [c.to_tuple() for c in deck]
-                    state['discard'] = [c.to_tuple() for c in discard]
+                    state['discard_pile'] = [c.to_tuple() for c in discard_pile]
                     state['log'].append(f"{player_name} drew a card.")
                     state['turn_index'] = (state['turn_index'] + state['direction']) % len(players)
                     players[player_name] = hand
